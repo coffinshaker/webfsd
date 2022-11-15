@@ -22,7 +22,7 @@
 # include <openssl/ssl.h>
 #endif
 
-#define MAX_HEADER 4096
+#define MAX_HEADER (4096 * 16)
 #define MAX_PATH   2048
 #define MAX_HOST     64
 #define MAX_MISC     16
@@ -65,6 +65,8 @@ struct REQUEST {
     /* request */
     char	hreq[MAX_HEADER+1];   /* request header */
     int 	lreq;		      /* request length */
+    int     dreq;             /* data length */
+    char    *data;
     int         hdata;                /* data in hreq */
     char        type[MAX_MISC+1];     /* req type */
     char        hostname[MAX_HOST+1]; /* hostname */
@@ -84,6 +86,7 @@ struct REQUEST {
     char        *r_head;
     int         *r_hlen;
     char        *cors;
+    int         is_put;
     
     /* response */
     int         status;              /* status code (log) */
@@ -92,6 +95,7 @@ struct REQUEST {
     int	        lres;		     /* header length */
     char        *mime;               /* mime type */
     char	*body;
+    char    putbody[MAX_HEADER+1];
     off_t       lbody;
     int         bfd;                 /* file descriptor */
     struct stat bst;                 /* file info */
@@ -162,6 +166,7 @@ extern int    do_chroot;
 extern char   *server_name;
 extern char   *indexhtml;
 extern char   *cgipath;
+extern char   *putpath;
 extern char   *doc_root;
 extern char   server_host[];
 extern char   *userpass;
@@ -212,6 +217,7 @@ extern char *h404,*b404;
 extern char *h500,*b500;
 extern char *h501,*b501;
 
+void mkputok(struct REQUEST *req, int status, char *filename, int ka);
 void mkerror(struct REQUEST *req, int status, int ka);
 void mkredirect(struct REQUEST *req);
 void mkheader(struct REQUEST *req, int status);
@@ -221,8 +227,8 @@ void write_request(struct REQUEST *req);
 /* --- ls.c ----------------------------------------------------- */
 
 void init_quote(void);
-char*  quote(unsigned char *path, int maxlength);
-struct DIRCACHE *get_dir(struct REQUEST *req, char *filename);
+char*  quote(char *path, int maxlength);
+struct DIRCACHE *get_dir(struct REQUEST *req, char *filename, int text_html);
 void free_dir(struct DIRCACHE *dir);
 
 /* --- mime.c --------------------------------------------------- */

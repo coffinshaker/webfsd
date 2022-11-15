@@ -38,6 +38,7 @@ char    *cors          = NULL;
 char    *doc_root      = ".";
 char    *indexhtml     = NULL;
 char    *cgipath       = NULL;
+char    *putpath       = NULL;
 char    *listen_ip     = NULL;
 char    *listen_port   = "8000";
 int     virtualhosts   = 0;
@@ -141,6 +142,8 @@ usage(char *name)
 #endif
 	    "  -x dir   CGI script directory (relative to\n"
 	    "           document root)                      [%s]\n"
+	    "  -U dir   PUT request directory (relative to\n"
+	    "           document root)                      [%s]\n"
 	    "  -~ dir   user home directory (will expand\n"
 	    "           /~user/path to $HOME/dir/path\n",
 	    h ? h+1 : name,
@@ -165,7 +168,8 @@ usage(char *name)
 #ifdef USE_SSL
 	    certificate,
 #endif
-	    cgipath ? cgipath : "none");
+	    cgipath ? cgipath : "none",
+	    putpath ? putpath : "none");
     if (getuid() == 0) {
 	pw = getpwuid(0);
 	gr = getgrgid(getgid());
@@ -475,7 +479,7 @@ mainloop(void *thread_arg)
 			open_ssl_session(req);
 #endif
 		    length = sizeof(req->peer);
-		    if (-1 == getpeername(req->fd,(struct sockaddr*)&(req->peer),&length)) {
+		    if (-1 == getpeername(req->fd,(struct sockaddr*)&(req->peer),(socklen_t*)&length)) {
 			xperror(LOG_WARNING,"getpeername",NULL);
 			req->state = STATE_CLOSE;
 		    }
@@ -593,6 +597,7 @@ header_parsing:
 		req->body      = NULL;
 		req->written   = 0;
 		req->head_only = 0;
+		req->is_put    = 0;
 		req->rh        = 0;
 		req->rb        = 0;
 		if (req->dir) {
@@ -610,6 +615,7 @@ header_parsing:
 		    req->state = STATE_KEEPALIVE;
 		    req->hdata = 0;
 		    req->lreq  = 0;
+		    req->data  = NULL;
 #ifdef TCP_CORK
 		    if (1 == req->tcp_cork) {
 			req->tcp_cork = 0;
@@ -627,6 +633,7 @@ header_parsing:
 			    req->hdata-req->lreq);
 		    req->hdata -= req->lreq;
 		    req->lreq  =  0;
+		    req->data  = NULL;
 		    read_request(req,1);
 		    goto header_parsing;
 		}
@@ -707,7 +714,7 @@ main(int argc, char *argv[])
     /* parse options */
     for (;;) {
 	if (-1 == (c = getopt(argc,argv,"hvsdF46jS"
-			      "O:r:R:f:p:n:N:i:t:c:a:u:g:l:L:m:y:b:k:e:x:C:P:~:")))
+			      "O:r:R:f:p:n:N:i:t:c:a:u:g:l:L:m:y:b:k:e:x:U:C:P:~:")))
 	    break;
 	switch (c) {
 	case 'h':
@@ -797,6 +804,14 @@ main(int argc, char *argv[])
 	    } else {
 		cgipath = malloc(strlen(optarg)+2);
 		sprintf(cgipath,"%s/",optarg);
+	    }
+	    break;
+	case 'U':
+	    if (optarg[strlen(optarg)-1] == '/') {
+		putpath = optarg;
+	    } else {
+		putpath = malloc(strlen(optarg)+2);
+		sprintf(putpath,"%s/",optarg);
 	    }
 	    break;
 #ifdef USE_THREADS
@@ -1001,7 +1016,7 @@ main(int argc, char *argv[])
 	int i;
 	threads = malloc(sizeof(pthread_t) * nthreads);
 	for (i = 1; i < nthreads; i++) {
-	    pthread_create(threads+i,NULL,mainloop,threads+i);
+	    pthread_create(threads+i,NULL,mainloop,NULL); // ??? threads+i);
 	    pthread_detach(threads[i]);
 	}
     }

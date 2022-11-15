@@ -112,7 +112,7 @@ cgi_request(struct REQUEST *req)
 
     /* lookup local socket (before it gets closed) */
     length = sizeof(addr);
-    getsockname(req->fd,(struct sockaddr*)&addr,&length);
+    getsockname(req->fd,(struct sockaddr*)&addr,(socklen_t*)&length);
     getnameinfo((struct sockaddr*)&addr,length,host,64,serv,8,
 		NI_NUMERICHOST | NI_NUMERICSERV);
     
@@ -168,7 +168,10 @@ cgi_request(struct REQUEST *req)
 	env_add(&env,"PATH_INFO","");
     }
     env_add(&env,"SCRIPT_NAME",req->path);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
     snprintf(filename,sizeof(filename)-1,"%s%s",doc_root,req->path);
+#pragma GCC diagnostic push
     env_add(&env,"SCRIPT_FILENAME",filename);
 
     /* start cgi app */

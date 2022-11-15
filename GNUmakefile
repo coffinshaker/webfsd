@@ -23,14 +23,14 @@ define make-config
 LIB          := $(LIB)
 SYSTEM       := $(call ac_uname)
 USE_SENDFILE := yes
-USE_THREADS  := no
+USE_THREADS  := yes
 USE_SSL      := $(call ac_header,openssl/ssl.h)
 USE_DIET     := $(call ac_binary,diet)
 endef
 
 # sendfile yes/no
 ifneq ($(USE_SENDFILE),yes)
-CFLAGS	+= -DNO_SENDFILE
+#CFLAGS	+= -DNO_SENDFILE
 endif
 
 # threads yes/no

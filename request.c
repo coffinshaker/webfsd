@@ -73,10 +73,32 @@ read_request(struct REQUEST *req, int pipelined)
 	    *(h-1) = 0;
 	}
 	req->lreq  = h - req->hreq;
+	req->data  = h;
+
+	printf ("searching content len...\n");
+	char *con_len = strcasestr(req->hreq,"Content-Length: ");
+	if (NULL != con_len) {
+		sscanf(con_len+16,"%d", &req->dreq);
+		printf ("datalen: %d\n", req->dreq);
+		return;
+	} else {
+		req->dreq = 0;
+	}
+
+	// TODO
 	req->state = STATE_PARSE_HEADER;
 	return;
     }
 
+    printf ("%d.%d.%d\n", req->hdata, req->lreq, req->dreq);
+    if (req->hdata == req->lreq + req->dreq) {
+	if (req->data != NULL) {
+		printf ("data: %s\n", req->data);
+	}
+	req->state = STATE_PARSE_HEADER;
+	return;
+
+    }
     if (req->hdata == MAX_HEADER) {
 	/* oops: buffer full, but found no complete request ... */
 	mkerror(req,400,0);
@@ -216,10 +238,10 @@ unhex(unsigned char c)
 
 /* handle %hex quoting, also split path / querystring */
 static void
-unquote(unsigned char *path, unsigned char *qs, unsigned char *src)
+unquote(char *path, char *qs, char *src)
 {
     int q;
-    unsigned char *dst;
+    char *dst;
 
     q=0;
     dst = path;
@@ -366,7 +388,10 @@ parse_request(struct REQUEST *req)
 	return;
     }
     if (filename[0] == '/') {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-truncation"
 	strncpy(req->uri,filename,sizeof(req->uri)-1);
+#pragma GCC diagnostic pop
     } else {
 	port = 0;
 	*proto = 0;
@@ -396,6 +421,7 @@ parse_request(struct REQUEST *req)
 		req->fd, req->type, req->path, req->major, req->minor);
 
     if (0 != strcmp(req->type,"GET") &&
+	0 != strcmp(req->type,"PUT") &&
 	0 != strcmp(req->type,"HEAD")) {
 	mkerror(req,501,0);
 	return;
@@ -405,6 +431,9 @@ parse_request(struct REQUEST *req)
 	req->head_only = 1;
     }
 
+    if (0 == strcmp(req->type,"PUT")) {
+	req->is_put = 1;
+    }
     /* parse header lines */
     req->keep_alive = req->minor;
     for (h = req->hreq; h - req->hreq < req->lreq;) {
@@ -436,7 +465,7 @@ parse_request(struct REQUEST *req)
 	    req->if_range = h+10;
 
 	} else if (0 == strncasecmp(h,"Authorization: Basic ",21)) {
-	    decode_base64(req->auth,h+21,sizeof(req->auth)-1);
+	    decode_base64((unsigned char*)req->auth,(unsigned char*)h+21,sizeof(req->auth)-1);
 	    if (debug)
 		fprintf(stderr,"%03d: auth: %s\n",req->fd,req->auth);
 	    
@@ -489,6 +518,7 @@ parse_request(struct REQUEST *req)
 	cgi_request(req);
 	return;
     }
+    int plain_list = 0;
 
     /* build filename */
     if (userdir  &&  '~' == req->path[1]) {
@@ -509,14 +539,36 @@ parse_request(struct REQUEST *req)
 	len = snprintf(filename, sizeof(filename)-1,
 		       "%s/%s/%s", pw->pw_dir, userdir, h+1);
     } else {
+    	char *p_list_dir = strstr(req->path, "/list.dir");
+
+	if (p_list_dir) {
+		plain_list = 1;
+		p_list_dir [1] = '\0';
+	}
 	len = snprintf(filename, sizeof(filename)-1,
-		       "%s%s%s%s",
+		       "%s%s%s%s%s%s",
 		       do_chroot ? "" : doc_root,
+		       req->is_put ? "/" : "",
+		       req->is_put ? putpath : "",
 		       virtualhosts ? "/" : "",
 		       virtualhosts ? req->hostname : "",
 		       req->path);
     }
 
+    if (req->is_put) {
+	printf("file: %s\ndata: %s\n", filename, req->data);
+	int fd;
+
+	if (-1 != (fd = open(filename,O_WRONLY|O_CREAT|O_TRUNC,S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH))) {
+		/* ok, we have one */
+		write(fd, req->data, req->dreq);
+		close(fd);
+		mkputok(req,201,req->path,0);
+	} else {
+		mkerror(req,403,1);
+	}
+	return;
+    }
     h = filename +len -1;
     if (*h == '/') {
 	/* looks like the client asks for a directory */
@@ -552,8 +604,8 @@ parse_request(struct REQUEST *req)
 	    return;
 	}
 	strftime(req->mtime, sizeof(req->mtime), RFC1123, gmtime(&req->bst.st_mtime));
-	req->mime = "text/html";
-	req->dir = get_dir(req,filename);
+	req->mime = plain_list ? "text/plain" : "text/html";
+	req->dir = get_dir(req,filename,!plain_list);
 	if (NULL == req->body) {
 	    /* We arrive here if opendir failed, probably due to -EPERM
 	     * It does exist (see the stat() call above) */

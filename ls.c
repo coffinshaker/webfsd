@@ -140,23 +140,23 @@ init_quote(void)
 }
 
 char*
-quote(unsigned char *path, int maxlength)
+quote(char *path, int maxlength)
 {
-    static unsigned char buf[2048]; /* FIXME: threads break this... */
+    static char buf[2048]; /* FIXME: threads break this... */
     int i,j,n=strlen(path);
 
     if (n > maxlength)
 	n = maxlength;
 
     for (i=0, j=0; i<n && j<sizeof(buf)-4; i++, j++) {
-	if (!do_quote[path[i]]) {
+	if (!do_quote[(unsigned char)path[i]]) {
 	    buf[j] = path[i];
 	    continue;
 	}
 	sprintf(buf+j,"%%%02x",path[i]);
 	j += 2;
     }
-    buf[j] = 0;
+    buf[j] = '\0';
     return buf;
 }
 
@@ -187,7 +187,7 @@ static void strmode(mode_t mode, char *dest)
 #endif
 
 static char*
-ls(time_t now, char *hostname, char *filename, char *path, int *length)
+ls(time_t now, char *hostname, char *filename, char *path, int *length, int text_html)
 {
     DIR            *dir;
     struct dirent  *file;
@@ -216,6 +216,10 @@ ls(time_t now, char *hostname, char *filename, char *path, int *length)
 	}
 	if (0 == strcmp(path,"/") && 0 == strcmp(file->d_name,"..")) {
 	    /* skip the ".." directory in root dir */
+	    count--;
+	    continue;
+	} else if (!text_html && 0 == strcmp(file->d_name,"..")) {
+	    /* skip the ".." directory in plain text mode */
 	    count--;
 	    continue;
 	}
@@ -264,11 +268,13 @@ ls(time_t now, char *hostname, char *filename, char *path, int *length)
 	goto oom;
     len  = 0;
 
+    if (text_html) {
     len += sprintf(buf+len,
 		   "<head><title>%s:%d%s</title></head>\n"
 		   "<body bgcolor=white text=black link=darkblue vlink=firebrick alink=red>\n"
 		   "<h1>listing: \n",
 		   hostname,tcp_port,path);
+    }
 
     h1 = path, h2 = path+1;
     for (;;) {
@@ -281,11 +287,13 @@ ls(time_t now, char *hostname, char *filename, char *path, int *length)
 		goto oom;
 	    buf = re2;
 	}
+	if (text_html) {
 	len += sprintf(buf+len,"<a href=\"%s\">%*.*s</a>",
 		       quote(path,h2-path),
 		       (int)(h2-h1),
 		       (int)(h2-h1),
 		       h1);
+	}
 	h1 = h2;
 	h2 = strchr(h2,'/');
 	if (NULL == h2)
@@ -293,12 +301,19 @@ ls(time_t now, char *hostname, char *filename, char *path, int *length)
 	h2++;
     }
 
+    if (text_html) {
     len += sprintf(buf+len,
 		   "</h1><hr noshade size=1><pre>\n"
 		   "<b>access      user      group     date             "
 		   "size  name</b>\n\n");
+    }
 
     for (i = 0; i < count; i++) {
+	if (0 == strcmp(files[i]->n, "cgi")) {
+		printf ("skip ");
+	printf ("%s\n", files[i]->n);
+		continue;
+	}
 	if (len > size)
 	    abort();
 	if (len+(LS_ALLOC_SIZE>>2) > size) {
@@ -309,6 +324,7 @@ ls(time_t now, char *hostname, char *filename, char *path, int *length)
 	    buf = re2;
 	}
 
+	if (text_html) {
 	/* mode */
 	strmode(files[i]->s.st_mode, buf+len);
 	len += 10;
@@ -358,8 +374,10 @@ ls(time_t now, char *hostname, char *filename, char *path, int *length)
 	    len += sprintf(buf+len,"%4d TB  ",
 			   (int)(files[i]->s.st_size>>40));
 	}
+	}
 
 	/* filename */
+	if (text_html) {
 	if (files[i]->r) {
 	    len += sprintf(buf+len,"<a href=\"%s%s\">%s</a>\n",
 			   quote(files[i]->n,9999),
@@ -368,13 +386,25 @@ ls(time_t now, char *hostname, char *filename, char *path, int *length)
 	} else {
 	    len += sprintf(buf+len,"%s\n",files[i]->n);
 	}
+	} else {
+		len += sprintf(buf+len,"%s",files[i]->n);
+		if (S_ISDIR(files[i]->s.st_mode)) {
+		    len += sprintf(buf+len,",DIR\n");
+		} else if (!S_ISREG(files[i]->s.st_mode)) {
+		    len += sprintf(buf+len,",-\n");
+		} else {
+		    len += sprintf(buf+len,",%jd\n", (intmax_t)files[i]->s.st_size);
     }
+	}
+    }
+	if (text_html) {
     strftime(line,32,"%d/%b/%Y %H:%M:%S GMT",gmtime(&now));
     len += sprintf(buf+len,
 		   "</pre><hr noshade size=1>\n"
 		   "<small><a href=\"%s\">%s</a> &nbsp; %s</small>\n"
 		   "</body>\n",
 		   HOMEPAGE,server_name,line);
+		}
     for (i = 0; i < count; i++)
 	free(files[i]);
     if (count)
@@ -423,15 +453,18 @@ void free_dir(struct DIRCACHE *dir)
 }
 
 struct DIRCACHE*
-get_dir(struct REQUEST *req, char *filename)
+get_dir(struct REQUEST *req, char *filename, int text_html)
 {
     struct DIRCACHE  *this,*prev;
     int              i;
+    char plain_filename [1024];
+
+    snprintf (plain_filename, 1024, "%s%s", filename, text_html ? "" : "list.dir");
 
     DO_LOCK(lock_dircache);
     for (prev = NULL, this = dirs, i=0; this != NULL;
 	 prev = this, this = this->next, i++) {
-	if (0 == strcmp(filename,this->path)) {
+	if (0 == strcmp(plain_filename,this->path)) {
 	    /* remove from list */
 	    if (NULL == prev)
 		dirs = this->next;
@@ -476,10 +509,12 @@ get_dir(struct REQUEST *req, char *filename)
 	dirs = this;
 	DO_UNLOCK(lock_dircache);
 
-	strcpy(this->path,  filename);
+	fprintf (stderr, "dir: caching %s\n", plain_filename);
+
+	strcpy(this->path,  plain_filename);
 	strcpy(this->mtime, req->mtime);
 	this->add   = now;
-	this->html  = ls(now,req->hostname,filename,req->path,&(this->length));
+	this->html  = ls(now,req->hostname,filename,req->path,&(this->length),text_html);
 
 	DO_LOCK(this->lock_reading);
 	this->reading = 0;

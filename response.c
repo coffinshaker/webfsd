@@ -152,6 +152,7 @@ static struct HTTP_STATUS {
     char *body;
 } http[] = {
     { 200, "200 OK",                       NULL },
+    { 201, "201 Created",                  "Content-Location: " },
     { 206, "206 Partial Content",          NULL },
     { 304, "304 Not Modified",             NULL },
     { 400, "400 Bad Request",              "*PLONK*\n" },
@@ -185,6 +186,23 @@ mkcors(struct REQUEST *req) {
         	fprintf(stderr, "%03d: CORS added: CORS=%s\n",
         		req->fd, req->cors);
     }
+}
+void
+mkputok(struct REQUEST *req, int status, char* filename, int ka)
+{
+    int i;
+    for (i = 0; http[i].status != 0; i++)
+	if (http[i].status == status)
+	    break;
+    req->status = status;
+    req->lbody = sprintf (req->putbody, "%s%s", http[i].body, filename);
+    req->body   = req->putbody;
+    //req->lbody  = strlen(req->body);
+    if (!ka)
+	req->keep_alive = 0;
+    req->lres = sprintf(req->hres, "HTTP/1.1 %s\r\n",
+			http[i].head);
+    req->state = STATE_WRITE_HEADER;
 
 }
 void

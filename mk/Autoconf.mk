@@ -132,11 +132,11 @@ config: Make.config
 	@true
 
 Make.config: $(srcdir)/GNUmakefile
-	ifeq ($(UNAME_S),Darwin)
-		@echo "$(make-config-q)" > $@
-	else
+#ifeq ($(UNAME_S),Darwin)
+#	@echo "$(make-config-q)" > $@
+#else
 		@echo -e "$(make-config-q)" > $@
-	endif
+#	endif
 	@echo
 	@echo "Make.config written, edit if needed"
 	@echo

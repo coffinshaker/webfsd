@@ -4,7 +4,7 @@
 # directories
 DESTDIR	=
 srcdir	?= .
-prefix	?= /usr/local
+prefix	?= /usr
 bindir	=  $(DESTDIR)$(prefix)/bin
 mandir	=  $(DESTDIR)$(prefix)/share/man
 locdir  =  $(DESTDIR)$(prefix)/share/locale
